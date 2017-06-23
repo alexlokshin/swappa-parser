@@ -13,24 +13,27 @@ const dynamo = new AWS.DynamoDB.DocumentClient();
 
 const TABLE_NAME = 'swappa';
 
+
 function crawlSwappa(cb) {
     let previousItems = [];
 
     var params = {
-        TableName: "swappa",
-        ProjectionExpression: "itemNumber, price, description, item_bucket",
+        TableName: TABLE_NAME,
+        ProjectionExpression: "itemNumber, price, description, item_bucket, active",
     };
     console.log('Loading previously indexed items...');
-    /*dynamo.scan(params, function (err, data) {
+    dynamo.scan(params, function (err, data) {
         if (data && data.Items) {
             for (var i in data.Items) {
-                previousItems.push(data.Items[i]);
+                if (data.Items[i].active == 1) {
+                    previousItems.push(data.Items[i]);
+                }
             }
             console.log('Loaded', previousItems.length, 'previously indexed items.');
         } else {
             console.log('Did not load any previously indexed items: ', err);
         }
-    });*/
+    });
 
 
     let items = [];
@@ -42,103 +45,116 @@ function crawlSwappa(cb) {
 
     crawler.on('drain', function () {
         console.log('Draining, found', items.length, 'items.');
-        //var sb = new StringBuilder({newline: '\r\n'});
 
         let soldItems = [];
         let newItems = [];
         let priceDrops = [];
+        let batchParams = [];
 
         async.eachSeries(items, function (item, cb) {
+            var match = previousItems.filter((e) => e.itemNumber == item.itemNumber);
+            var doc = null;
+            if (match && match.length > 0)
+                doc = match[0];
 
-            var params = {
-                TableName: TABLE_NAME,
-                Key: {'itemNumber': item.itemNumber}
-            };
-
-            dynamo.get(params, function (err, doc) {
-                if (err)
-                    console.error('get', err);
-                if (doc) {
+            if (doc) { // Updating existing record
+                if (doc.price != item.price) {
                     if (doc.price > item.price) {
                         priceDrops.push(item);
                         item.oldPrice = doc.price;
-                    } else item.oldPrice = item.price;
-
-                    var params = {
-                        TableName: TABLE_NAME,
-                        Key: {'itemNumber': item.itemNumber},
-                        UpdateExpression: "set price = :p, description = :d, item_bucket = :b, old_price = :o",
-                        ExpressionAttributeValues: {
-                            ":p": item.price,
-                            ":d": item.description,
-                            ":b": item.item_bucket,
-                            ":o": item.oldPrice
-                        },
-                        ReturnValues: "UPDATED_NEW"
-                    };
-
-
-                    dynamo.update(params, function (err, data) {
-                        if (err)
-                            console.error('update', err);
-                        cb();
+                    }
+                    batchParams.push({
+                        PutRequest: {
+                            Item: {
+                                'itemNumber': item.itemNumber,
+                                'price': item.price,
+                                'old_price': item.oldPrice,
+                                'item_bucket': item.item_bucket,
+                                'description': item.description,
+                                'active': 1
+                            }
+                        }
                     });
+                }
 
 
-                } else {
-                    newItems.push(item);
-                    // New item
-                    var params = {
-                        TableName: TABLE_NAME,
+                cb();
+            } else { // Inserting a new item
+                newItems.push(item);
+                batchParams.push({
+                    PutRequest: {
                         Item: {
                             'itemNumber': item.itemNumber,
                             'price': item.price,
+                            'old_price': item.oldPrice,
                             'item_bucket': item.item_bucket,
-                            'description': item.description
+                            'description': item.description,
+                            'active': 1
                         }
-                    };
+                    }
+                });
 
-                    dynamo.put(params, function (err, data) {
+                cb();
+            }
 
-                        if (err)
-                            console.error('put', err);
-                        cb();
-                    });
-                }
-            });
 
         }, function (err) {
 
             if (err)
                 console.error(err);
-            /*
-                console.log('Looking for sold items');
-                async.eachSeries(previousItems, function (item, cb) {
+
+            console.log('Looking for sold items');
+            async.eachSeries(previousItems, function (item, cb) {
                 var match = items.filter((e) => e.itemNumber == item.itemNumber);
 
                 if (!match || match.length == 0) {
                     soldItems.push(item);
 
-
-                    var params = {
-                        TableName: TABLE_NAME,
-                        Key: item.itemNumber
-                    };
-
-                    dynamo.delete(params, function (err, data) {
-                        if (err)
-                            console.error(err);
-                        cb();
+                    batchParams.push({
+                        PutRequest: {
+                            Item: {
+                                'itemNumber': item.itemNumber,
+                                'price': item.price,
+                                'old_price': item.oldPrice,
+                                'item_bucket': item.item_bucket,
+                                'description': item.description,
+                                'active': 0
+                            }
+                        }
                     });
+
+                    cb();
                 } else
                     cb();
             }, function () {
-                console.log('Done with historic updates.');
+                console.log('Found', batchParams.length, 'items to update.');
+                var batches = [];
+                while (batchParams.length > 0) {
+                    batches.push(batchParams.splice(0, 25));
+                }
+                console.log('Split into ', batches.length, 'batches.');
 
-                cb(newItems, priceDrops, soldItems, items);
-            });*/
 
-            cb(newItems, priceDrops, soldItems, items);
+                async.eachSeries(batches, function (batch, next) {
+
+                    var params = {
+                        RequestItems: {'swappa': batch}
+                    };
+                    dynamo.batchWrite(params, function (err, data) {
+                        if (err) {
+                            console.log('Error: ', err);
+                            console.log('Request:', JSON.stringify(params));
+                            console.log('Response:', JSON.stringify(data));
+                        }
+
+                        next(err);
+                    });
+                }, function (err) {
+                    console.log('Done with historic updates.', err);
+
+                    cb(newItems, priceDrops, soldItems, items);
+                });
+            });
         });
     });
 
@@ -278,7 +294,7 @@ function capture(callback) {
                 }
             }
             sb.build(function (err, result) {
-                console.log(result);
+                //console.log(result);
 
                 SES.sendEmail({
                     Destination: {
