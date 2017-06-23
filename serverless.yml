@@ -17,6 +17,7 @@ provider:
         - "logs:CreateLogGroup"
         - "logs:CreateLogStream"
         - "logs:PutLogEvents"
+        - "dynamodb:*"
       Resource: "*"
 
 functions:

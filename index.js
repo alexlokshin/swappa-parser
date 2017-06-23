@@ -1,29 +1,37 @@
 'use strict';
+const isLambda = !!(process.env.LAMBDA_TASK_ROOT || false);
 
 const AWS = require("aws-sdk");
-//AWS.config.loadFromPath('./config.json');
+if (!isLambda) {
+    AWS.config.loadFromPath('./config.json');
+}
 const SES = new AWS.SES({region: 'us-east-1'});
 const Crawler = require('crawler');
 const async = require('async');
 const StringBuilder = require('stringbuilder');
+const dynamo = new AWS.DynamoDB.DocumentClient();
 
-const Datastore = require('nedb')
-    , db = new Datastore({filename: '/tmp/swappa.db', autoload: true});
-//, db = new Datastore();
-
-db.loadDatabase(function (err) {
-    if (err)
-        console.error(err);
-});
-
+const TABLE_NAME = 'swappa';
 
 function crawlSwappa(cb) {
     let previousItems = [];
-    db.find({}, function (err, docs) {
-        for (var i in docs) {
-            previousItems.push(docs[i]);
+
+    var params = {
+        TableName: "swappa",
+        ProjectionExpression: "itemNumber, price, description, item_bucket",
+    };
+    console.log('Loading previously indexed items...');
+    /*dynamo.scan(params, function (err, data) {
+        if (data && data.Items) {
+            for (var i in data.Items) {
+                previousItems.push(data.Items[i]);
+            }
+            console.log('Loaded', previousItems.length, 'previously indexed items.');
+        } else {
+            console.log('Did not load any previously indexed items: ', err);
         }
-    });
+    });*/
+
 
     let items = [];
 
@@ -42,44 +50,82 @@ function crawlSwappa(cb) {
 
         async.eachSeries(items, function (item, cb) {
 
-            db.findOne({_id: item.itemNumber}, function (err, doc) {
+            var params = {
+                TableName: TABLE_NAME,
+                Key: {'itemNumber': item.itemNumber}
+            };
+
+            dynamo.get(params, function (err, doc) {
                 if (err)
-                    console.error(err);
+                    console.error('get', err);
                 if (doc) {
                     if (doc.price > item.price) {
                         priceDrops.push(item);
-                        //sb.appendLine('Price drop ({0}->{1}) on item {2}, {3}.', doc.price, item.price, item.itemNumber, item.bucket);
                         item.oldPrice = doc.price;
-                    }
+                    } else item.oldPrice = item.price;
 
-                    db.update({_id: item.itemNumber}, item, {}, function (err) {
+                    var params = {
+                        TableName: TABLE_NAME,
+                        Key: {'itemNumber': item.itemNumber},
+                        UpdateExpression: "set price = :p, description = :d, item_bucket = :b, old_price = :o",
+                        ExpressionAttributeValues: {
+                            ":p": item.price,
+                            ":d": item.description,
+                            ":b": item.item_bucket,
+                            ":o": item.oldPrice
+                        },
+                        ReturnValues: "UPDATED_NEW"
+                    };
+
+
+                    dynamo.update(params, function (err, data) {
                         if (err)
-                            console.error(err);
+                            console.error('update', err);
                         cb();
                     });
+
+
                 } else {
                     newItems.push(item);
                     // New item
-                    //sb.appendLine('New item:\t{0}\t{1}\t{2}\{3}', item.bucket, item.price, item.description, item.itemNumber);
-                    item._id = item.itemNumber;
+                    var params = {
+                        TableName: TABLE_NAME,
+                        Item: {
+                            'itemNumber': item.itemNumber,
+                            'price': item.price,
+                            'item_bucket': item.item_bucket,
+                            'description': item.description
+                        }
+                    };
 
-                    db.insert(item, function (err, newDoc) {
+                    dynamo.put(params, function (err, data) {
+
                         if (err)
-                            console.error(err);
+                            console.error('put', err);
                         cb();
                     });
                 }
             });
+
         }, function (err) {
-            console.log('Looking for sold items');
+
             if (err)
                 console.error(err);
-            async.eachSeries(previousItems, function (item, cb) {
-                var match = items.filter((e) => e.itemNumber == item._id);
+            /*
+                console.log('Looking for sold items');
+                async.eachSeries(previousItems, function (item, cb) {
+                var match = items.filter((e) => e.itemNumber == item.itemNumber);
 
                 if (!match || match.length == 0) {
                     soldItems.push(item);
-                    db.remove({_id: item._id}, {}, function (err, numRemoved) {
+
+
+                    var params = {
+                        TableName: TABLE_NAME,
+                        Key: item.itemNumber
+                    };
+
+                    dynamo.delete(params, function (err, data) {
                         if (err)
                             console.error(err);
                         cb();
@@ -90,7 +136,9 @@ function crawlSwappa(cb) {
                 console.log('Done with historic updates.');
 
                 cb(newItems, priceDrops, soldItems, items);
-            });
+            });*/
+
+            cb(newItems, priceDrops, soldItems, items);
         });
     });
 
@@ -153,7 +201,7 @@ function crawlSwappa(cb) {
                                 }
 
                                 items.push({
-                                    bucket: screenSize + '-' + capacity + '-' + connectivity,
+                                    item_bucket: screenSize + '-' + capacity + '-' + connectivity,
                                     capacity: parseInt(capacity),
                                     connectivity: connectivity,
                                     description: description,
@@ -180,36 +228,36 @@ function crawlSwappa(cb) {
 function capture(callback) {
     crawlSwappa(function (newItems, priceDrops, soldItems, items) {
         console.log('Done crawling.');
-        var sb = new StringBuilder( {newline:'\r\n'} );
+        var sb = new StringBuilder({newline: '\r\n'});
 
         let sendMail = false;
-        if (newItems.length>0) {
+        if (newItems.length > 0) {
             sendMail = true;
             sb.appendLine();
             sb.appendLine('New Items:');
             newItems.sort((a, b) => a.price - b.price);
             for (var i in newItems) {
-                sb.appendLine('{0}\t{1}\t{2}\t{3}', newItems[i].bucket, newItems[i].price, newItems[i].description, newItems[i].itemNumber);
+                sb.appendLine('{0}\t{1}\t{2}\t{3}', newItems[i].item_bucket, newItems[i].price, newItems[i].description, newItems[i].itemNumber);
             }
         }
 
-        if (priceDrops.length>0) {
+        if (priceDrops.length > 0) {
             sendMail = true;
             sb.appendLine();
             sb.appendLine('Price Drops:');
             priceDrops.sort((a, b) => a.price - b.price);
             for (var i in priceDrops) {
-                sb.appendLine('{0}\t{1}->{2}\t{3}\t{4}', priceDrops[i].bucket, priceDrops[i].oldPrice, priceDrops[i].price, priceDrops[i].description, priceDrops[i].itemNumber);
+                sb.appendLine('{0}\t{1}->{2}\t{3}\t{4}', priceDrops[i].item_bucket, priceDrops[i].oldPrice, priceDrops[i].price, priceDrops[i].description, priceDrops[i].itemNumber);
             }
         }
 
-        if (soldItems.length>0) {
+        if (soldItems.length > 0) {
             sendMail = true;
             sb.appendLine();
             sb.appendLine('Sold Items:');
             soldItems.sort((a, b) => a.price - b.price);
             for (var i in soldItems) {
-                sb.appendLine('{0}\t{1}\t{2}\t{3}', soldItems[i].bucket, soldItems[i].price, soldItems[i].description, soldItems[i].itemNumber);
+                sb.appendLine('{0}\t{1}\t{2}\t{3}', soldItems[i].item_bucket, soldItems[i].price, soldItems[i].description, soldItems[i].itemNumber);
             }
         }
         if (sendMail) {
@@ -219,13 +267,13 @@ function capture(callback) {
             sb.appendLine('Lowest priced items:');
             for (var i in items) {
                 if (items[i].capacity > 0) {
-                    if (!counter[items[i].bucket])
-                        counter[items[i].bucket] = 0;
+                    if (!counter[items[i].item_bucket])
+                        counter[items[i].item_bucket] = 0;
 
-                    if (counter[items[i].bucket] < 5) {
-                        sb.appendLine('{0}\t{1}\t{2}\t{3}', items[i].bucket, items[i].price, items[i].description, items[i].itemNumber);
+                    if (counter[items[i].item_bucket] < 5) {
+                        sb.appendLine('{0}\t{1}\t{2}\t{3}', items[i].item_bucket, items[i].price, items[i].description, items[i].itemNumber);
 
-                        counter[items[i].bucket] = counter[items[i].bucket] + 1;
+                        counter[items[i].item_bucket] = counter[items[i].item_bucket] + 1;
                     }
                 }
             }
@@ -266,14 +314,24 @@ function capture(callback) {
 
 
 module.exports.capture = (event, context, callback) => {
+    console.log('Capturing...');
     capture(function (err) {
+        console.log('Captured!');
+
         var body = {};
 
-        body.payload = {version: '1.0.1', status: 'OK', err: err};
+        body.payload = {version: '1.0.1', status: 'OK'};
         var response = {
             statusCode: 200,
             body: JSON.stringify(body)
         };
-        callback(err, response);
+        callback(null, response);
     });
 };
+
+
+if (!isLambda) {
+    capture(function (err) {
+        console.log('Done.');
+    });
+}
