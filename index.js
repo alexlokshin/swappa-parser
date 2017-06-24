@@ -14,6 +14,59 @@ const dynamo = new AWS.DynamoDB.DocumentClient();
 const TABLE_NAME = 'swappa';
 
 
+function classify_ipad_pro(productDescription, capacity) {
+    let connectivity = 'wifi';
+    if (productDescription.indexOf('verizon') > -1 || productDescription.indexOf('unlocked') > -1 || productDescription.indexOf('at&amp;t') > -1 || productDescription.indexOf('t-mobile') > -1) {
+        connectivity = 'cell';
+    }
+    let screenSize = '';
+    if (productDescription.indexOf('9.7') > -1) {
+        screenSize = '9.7';
+    }
+    if (productDescription.indexOf('10.5') > -1) {
+        screenSize = '10.5';
+    }
+    if (productDescription.indexOf('12.9') > -1) {
+        screenSize = '12.9';
+    }
+    return 'ipad-pro-'+screenSize + '-' + capacity + '-' + connectivity;
+}
+
+function classify_macbook_pro(productDescription, capacity) {
+
+    let screensize = '';
+    let year = '';
+    let type = '';
+
+    if (productDescription.indexOf('11"') > -1) {
+        screensize = '11';
+    }
+    if (productDescription.indexOf('12"') > -1) {
+        screensize = '12';
+    }
+    if (productDescription.indexOf('13"') > -1) {
+        screensize = '13';
+    }
+    if (productDescription.indexOf('15"') > -1) {
+        screensize = '15';
+    }
+    if (productDescription.indexOf('pro') > -1) {
+        type = 'pro';
+    }
+    if (productDescription.indexOf('air') > -1) {
+        type = 'air';
+    }
+
+    for (var i=1999; i<2100; i++) {
+        if (productDescription.indexOf(""+i) > -1) {
+            year = ""+i;
+        }
+    }
+
+
+    return 'macbook-'+year + '-' + screensize + '-' + capacity+'-'+type;
+}
+
 function crawlSwappa(cb) {
     let previousItems = [];
 
@@ -158,10 +211,10 @@ function crawlSwappa(cb) {
         });
     });
 
-    retrieveProductLinks(crawler, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios');
+    retrieveProductLinks(crawler, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios');
+    retrieveProductLinks(crawler, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook');
 
-
-    function retrieveProductLinks(crawler, entryPoint) {
+    function retrieveProductLinks(crawler, classify, entryPoint) {
         crawler.queue({
             uri: entryPoint,
             jQuery: true,
@@ -200,29 +253,16 @@ function crawlSwappa(cb) {
                                 let price = $(this).find("div.row > div.col-xs-2.col-md-2 > a.price").text().trim().replace('$', '');
                                 let description = $(this).find('div.more_area > div.headline > a').text().trim();
                                 let itemNumber = $(this).find('div.more_area > div.headline > a').attr('href').trim().replace('/listing/', '').replace('/buy/stock/', '').replace('/view', '');
+
                                 let capacity = $(this).find("div.row > div.col-xs-2.col-md-2 > span.storage").text().replace(' GB', '').trim();
-                                let connectivity = 'wifi';
-                                if (productDescription.indexOf('verizon') > -1 || productDescription.indexOf('unlocked') > -1 || productDescription.indexOf('at&amp;t') > -1 || productDescription.indexOf('t-mobile') > -1) {
-                                    connectivity = 'cell';
-                                }
-                                let screenSize = '';
-                                if (productDescription.indexOf('9.7') > -1) {
-                                    screenSize = '9.7';
-                                }
-                                if (productDescription.indexOf('10.5') > -1) {
-                                    screenSize = '10.5';
-                                }
-                                if (productDescription.indexOf('12.9') > -1) {
-                                    screenSize = '12.9';
-                                }
+
+                                let bucket = classify(productDescription, capacity);
 
                                 items.push({
-                                    item_bucket: screenSize + '-' + capacity + '-' + connectivity,
+                                    item_bucket: bucket,
                                     capacity: parseInt(capacity),
-                                    connectivity: connectivity,
                                     description: description,
                                     price: parseFloat(price),
-                                    screenSize: screenSize,
                                     itemNumber: itemNumber
                                 });
                             });
@@ -309,7 +349,7 @@ function capture(callback) {
                         },
                         Subject: {
                             Charset: "UTF-8",
-                            Data: "Swappa iPad Pro report"
+                            Data: "Swappa Report"
                         }
                     },
                     Source: "alex.lokshin@2zick.com"
