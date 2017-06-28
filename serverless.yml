@@ -21,11 +21,35 @@ provider:
       Resource: "*"
 
 functions:
-  capture:
-    handler: index.capture
+  capture_ipad_pro:
+    handler: index.capture_ipad_pro
     events:
       - http:
-          path: capture
+          path: capture_ipad_pro
           method: get
           cors: true
       - schedule: rate(5 minutes)
+  capture_macbook:
+    handler: index.capture_macbook
+    events:
+      - http:
+          path: capture_macbook
+          method: get
+          cors: true
+      - schedule: rate(10 minutes)
+  capture_iphone_7:
+    handler: index.capture_iphone_7
+    events:
+      - http:
+          path: capture_iphone_7
+          method: get
+          cors: true
+      - schedule: rate(10 minutes)
+  capture_iphone_7_plus:
+    handler: index.capture_iphone_7_plus
+    events:
+      - http:
+          path: capture_iphone_7_plus
+          method: get
+          cors: true
+      - schedule: rate(10 minutes)

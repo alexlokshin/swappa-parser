@@ -12,11 +12,15 @@ const StringBuilder = require('stringbuilder');
 const dynamo = new AWS.DynamoDB.DocumentClient();
 
 const TABLE_NAME = 'swappa';
+const IPAD_PRO_PREFIX = 'ipad-pro';
+const MACBOOK_PREFIX = 'macbook';
+const IPHONE_7_PLUS_PREFIX = 'iphone7plus';
+const IPHONE_7_PREFIX = 'iphone7-';
 
 
 function classify_ipad_pro(productDescription, capacity) {
     let connectivity = 'wifi';
-    if (productDescription.indexOf('verizon') > -1 || productDescription.indexOf('unlocked') > -1 || productDescription.indexOf('at&amp;t') > -1 || productDescription.indexOf('t-mobile') > -1) {
+    if (productDescription.indexOf('verizon') > -1 || productDescription.indexOf('unlocked') > -1 || productDescription.indexOf('at&amp;t') > -1 || productDescription.indexOf('t-mobile') > -1 || productDescription.indexOf('sprint') > -1) {
         connectivity = 'cell';
     }
     let screenSize = '';
@@ -29,7 +33,7 @@ function classify_ipad_pro(productDescription, capacity) {
     if (productDescription.indexOf('12.9') > -1) {
         screenSize = '12.9';
     }
-    return 'ipad-pro-'+screenSize + '-' + capacity + '-' + connectivity;
+    return IPAD_PRO_PREFIX+'-'+screenSize + '-' + capacity + '-' + connectivity;
 }
 
 function classify_macbook_pro(productDescription, capacity) {
@@ -64,10 +68,70 @@ function classify_macbook_pro(productDescription, capacity) {
     }
 
 
-    return 'macbook-'+year + '-' + screensize + '-' + capacity+'-'+type;
+    return MACBOOK_PREFIX+'-'+type+'-'+year + '-' + screensize + '-' + capacity;
 }
 
-function crawlSwappa(cb) {
+function classify_iphone_7_plus(productDescription, capacity) {
+
+    let carrier = 'other';
+
+
+    if (productDescription.indexOf('t-mobile') > -1) {
+        carrier = 'tmobile';
+    }
+
+    if (productDescription.indexOf('verizon') > -1) {
+        carrier = 'verizon';
+    }
+
+    if (productDescription.indexOf('unlocked') > -1) {
+        carrier = 'unlocked';
+    }
+
+    if (productDescription.indexOf('at&amp;t') > -1) {
+        carrier = 'att';
+    }
+
+    if (productDescription.indexOf('sprint') > -1) {
+        carrier = 'sprint';
+    }
+
+    return IPHONE_7_PLUS_PREFIX+'-'+carrier + '-' + capacity;
+}
+
+function classify_iphone_7(productDescription, capacity) {
+
+    let carrier = 'other';
+
+
+    if (productDescription.indexOf('t-mobile') > -1) {
+        carrier = 'tmobile';
+    }
+
+    if (productDescription.indexOf('verizon') > -1) {
+        carrier = 'verizon';
+    }
+
+    if (productDescription.indexOf('unlocked') > -1) {
+        carrier = 'unlocked';
+    }
+
+    if (productDescription.indexOf('at&amp;t') > -1) {
+        carrier = 'att';
+    }
+
+    if (productDescription.indexOf('other') > -1) {
+        carrier = 'other';
+    }
+
+    if (productDescription.indexOf('sprint') > -1) {
+        carrier = 'sprint';
+    }
+
+    return IPHONE_7_PREFIX+'-'+carrier + '-' + capacity;
+}
+
+function crawlSwappa(prefix, classify, entryPoint, cb) {
     let previousItems = [];
 
     var params = {
@@ -78,7 +142,7 @@ function crawlSwappa(cb) {
     dynamo.scan(params, function (err, data) {
         if (data && data.Items) {
             for (var i in data.Items) {
-                if (data.Items[i].active == 1) {
+                if (data.Items[i].active == 1 && data.Items[i].item_bucket.indexOf(prefix)==0) {
                     previousItems.push(data.Items[i]);
                 }
             }
@@ -112,7 +176,7 @@ function crawlSwappa(cb) {
 
             if (doc) { // Updating existing record
                 if (doc.price != item.price) {
-                    if (doc.price > item.price) {
+                    if (doc.price > item.price && (doc.price-item.price)>doc.price*0.05) {
                         priceDrops.push(item);
                         item.oldPrice = doc.price;
                     }
@@ -158,27 +222,31 @@ function crawlSwappa(cb) {
 
             console.log('Looking for sold items');
             async.eachSeries(previousItems, function (item, cb) {
-                var match = items.filter((e) => e.itemNumber == item.itemNumber);
+                if (!items || items.length==0)
+                    cb();
+                else {
+                    var match = items.filter((e) => e.itemNumber == item.itemNumber);
 
-                if (!match || match.length == 0) {
-                    soldItems.push(item);
+                    if (!match || match.length == 0) {
+                        soldItems.push(item);
 
-                    batchParams.push({
-                        PutRequest: {
-                            Item: {
-                                'itemNumber': item.itemNumber,
-                                'price': item.price,
-                                'old_price': item.oldPrice,
-                                'item_bucket': item.item_bucket,
-                                'description': item.description,
-                                'active': 0
+                        batchParams.push({
+                            PutRequest: {
+                                Item: {
+                                    'itemNumber': item.itemNumber,
+                                    'price': item.price,
+                                    'old_price': item.oldPrice,
+                                    'item_bucket': item.item_bucket,
+                                    'description': item.description,
+                                    'active': 0
+                                }
                             }
-                        }
-                    });
+                        });
 
-                    cb();
-                } else
-                    cb();
+                        cb();
+                    } else
+                        cb();
+                }
             }, function () {
                 console.log('Found', batchParams.length, 'items to update.');
                 var batches = [];
@@ -211,10 +279,13 @@ function crawlSwappa(cb) {
         });
     });
 
-    retrieveProductLinks(crawler, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios');
-    retrieveProductLinks(crawler, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook');
+    retrieveProductLinks(crawler, classify, entryPoint);
+
+    //retrieveProductLinks(crawler, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios');
+    //retrieveProductLinks(crawler, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook');
 
     function retrieveProductLinks(crawler, classify, entryPoint) {
+        console.log('Entry point: ',entryPoint);
         crawler.queue({
             uri: entryPoint,
             jQuery: true,
@@ -232,6 +303,15 @@ function crawlSwappa(cb) {
                     links.each(function (index) {
                         linkArray.push($(this).attr('href'));
                     });
+
+                    if (linkArray.length==0){
+                        var links = $("section.section_more > div.row.dev_grid > div.col-md-2.col-sm-3.col-xs-4 > div > div.title > a");
+
+
+                        links.each(function (index) {
+                            linkArray.push($(this).attr('href'));
+                        });
+                    }
 
                 }
 
@@ -281,60 +361,71 @@ function crawlSwappa(cb) {
     }
 }
 
-function capture(callback) {
-    crawlSwappa(function (newItems, priceDrops, soldItems, items) {
+function capture(prefix, classify, entryPoint, callback) {
+    crawlSwappa(prefix, classify, entryPoint, function (newItems, priceDrops, soldItems, items) {
         console.log('Done crawling.');
         var sb = new StringBuilder({newline: '\r\n'});
+        sb.appendLine("<html><body>");
 
         let sendMail = false;
         if (newItems.length > 0) {
             sendMail = true;
             sb.appendLine();
-            sb.appendLine('New Items:');
+            sb.appendLine('<h2>New Items:</h2>');
+            sb.appendLine("<ul>");
             newItems.sort((a, b) => a.price - b.price);
             for (var i in newItems) {
-                sb.appendLine('{0}\t{1}\t{2}\t{3}', newItems[i].item_bucket, newItems[i].price, newItems[i].description, newItems[i].itemNumber);
+                sb.appendLine('<li>{0}\t<b>{1}</b>\t{2}\t[<a href="http://www.swappa.com/listing/{3}/view">details</a>]</li>', newItems[i].item_bucket, newItems[i].price, newItems[i].description, newItems[i].itemNumber);
             }
+            sb.appendLine("</ul>");
         }
 
         if (priceDrops.length > 0) {
             sendMail = true;
             sb.appendLine();
-            sb.appendLine('Price Drops:');
+            sb.appendLine('<h2>Price Drops:</h2>');
+            sb.appendLine("<ul>");
             priceDrops.sort((a, b) => a.price - b.price);
             for (var i in priceDrops) {
-                sb.appendLine('{0}\t{1}->{2}\t{3}\t{4}', priceDrops[i].item_bucket, priceDrops[i].oldPrice, priceDrops[i].price, priceDrops[i].description, priceDrops[i].itemNumber);
+                sb.appendLine('<li>{0}\t<b>{1}->{2}</b>\t{3}\t[<a href="http://www.swappa.com/listing/{4}/view">details</a>]</li>', priceDrops[i].item_bucket, priceDrops[i].oldPrice, priceDrops[i].price, priceDrops[i].description, priceDrops[i].itemNumber);
+            }
+            sb.appendLine("</ul>");
+        }
+
+        if (newItems.length > 0 || priceDrops.length > 0) {
+            if (soldItems.length > 0) {
+                sendMail = true;
+                sb.appendLine();
+                sb.appendLine('<h2>Sold Items:</h2>');
+                sb.appendLine("<ul>");
+                soldItems.sort((a, b) => a.price - b.price);
+                for (var i in soldItems) {
+                    sb.appendLine('<li>{0}\t<b>{1}</b>\t{2}\t[<a href="http://www.swappa.com/listing/{3}/view">details</a>]</li>', soldItems[i].item_bucket, soldItems[i].price, soldItems[i].description, soldItems[i].itemNumber);
+                }
+                sb.appendLine("</ul>");
             }
         }
 
-        if (soldItems.length > 0) {
-            sendMail = true;
-            sb.appendLine();
-            sb.appendLine('Sold Items:');
-            soldItems.sort((a, b) => a.price - b.price);
-            for (var i in soldItems) {
-                sb.appendLine('{0}\t{1}\t{2}\t{3}', soldItems[i].item_bucket, soldItems[i].price, soldItems[i].description, soldItems[i].itemNumber);
-            }
-        }
         if (sendMail) {
             items.sort((a, b) => a.price - b.price);
             let counter = [];
             sb.appendLine('');
-            sb.appendLine('Lowest priced items:');
+            sb.appendLine('<h2>Lowest priced items:</h2>');
+            sb.appendLine("<ul>");
             for (var i in items) {
                 if (items[i].capacity > 0) {
                     if (!counter[items[i].item_bucket])
                         counter[items[i].item_bucket] = 0;
 
                     if (counter[items[i].item_bucket] < 5) {
-                        sb.appendLine('{0}\t{1}\t{2}\t{3}', items[i].item_bucket, items[i].price, items[i].description, items[i].itemNumber);
+                        sb.appendLine('<li>{0}\t<b>{1}</b>\t{2}\t[<a href="http://www.swappa.com/listing/{3}/view">details</a>]</li>', items[i].item_bucket, items[i].price, items[i].description, items[i].itemNumber);
 
                         counter[items[i].item_bucket] = counter[items[i].item_bucket] + 1;
                     }
                 }
             }
+            sb.appendLine("</body></html>");
             sb.build(function (err, result) {
-                //console.log(result);
 
                 SES.sendEmail({
                     Destination: {
@@ -342,7 +433,7 @@ function capture(callback) {
                     },
                     Message: {
                         Body: {
-                            Text: {
+                            Html: {
                                 Charset: "UTF-8",
                                 Data: result
                             }
@@ -368,10 +459,58 @@ function capture(callback) {
     });
 }
 
-
-module.exports.capture = (event, context, callback) => {
+module.exports.capture_macbook = (event, context, callback) => {
     console.log('Capturing...');
-    capture(function (err) {
+    capture(MACBOOK_PREFIX, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook', function (err) {
+        console.log('Captured!');
+
+        var body = {};
+
+        body.payload = {version: '1.0.1', status: 'OK'};
+        var response = {
+            statusCode: 200,
+            body: JSON.stringify(body)
+        };
+        callback(null, response);
+    });
+};
+
+
+module.exports.capture_ipad_pro = (event, context, callback) => {
+    console.log('Capturing...');
+    capture(IPAD_PRO_PREFIX, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios', function (err) {
+        console.log('Captured!');
+
+        var body = {};
+
+        body.payload = {version: '1.0.1', status: 'OK'};
+        var response = {
+            statusCode: 200,
+            body: JSON.stringify(body)
+        };
+        callback(null, response);
+    });
+};
+
+module.exports.capture_iphone_7_plus = (event, context, callback) => {
+    console.log('Capturing...');
+    capture(IPHONE_7_PLUS_PREFIX, classify_iphone_7_plus, 'https://swappa.com/buy/apple-iphone-7-plus', function (err) {
+        console.log('Captured!');
+
+        var body = {};
+
+        body.payload = {version: '1.0.1', status: 'OK'};
+        var response = {
+            statusCode: 200,
+            body: JSON.stringify(body)
+        };
+        callback(null, response);
+    });
+};
+
+module.exports.capture_iphone_7 = (event, context, callback) => {
+    console.log('Capturing...');
+    capture(IPHONE_7_PREFIX, classify_iphone_7, 'https://swappa.com/buy/apple-iphone-7', function (err) {
         console.log('Captured!');
 
         var body = {};
@@ -387,7 +526,19 @@ module.exports.capture = (event, context, callback) => {
 
 
 if (!isLambda) {
-    capture(function (err) {
+    /*capture(IPAD_PRO_PREFIX, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios', function (err) {
+        console.log('Done.');
+    });
+
+    capture(MACBOOK_PREFIX, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook', function (err) {
+        console.log('Done.');
+    });*/
+
+    capture(IPHONE_7_PLUS_PREFIX, classify_iphone_7_plus, 'https://swappa.com/buy/apple-iphone-7-plus', function (err) {
+        console.log('Done.');
+    });
+
+    capture(IPHONE_7_PREFIX, classify_iphone_7, 'https://swappa.com/buy/apple-iphone-7', function (err) {
         console.log('Done.');
     });
 }
