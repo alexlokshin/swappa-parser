@@ -33,7 +33,7 @@ function classify_ipad_pro(productDescription, capacity) {
     if (productDescription.indexOf('12.9') > -1) {
         screenSize = '12.9';
     }
-    return IPAD_PRO_PREFIX+'-'+screenSize + '-' + capacity + '-' + connectivity;
+    return IPAD_PRO_PREFIX + '-' + screenSize + '-' + capacity + '-' + connectivity;
 }
 
 function classify_macbook_pro(productDescription, capacity) {
@@ -61,14 +61,14 @@ function classify_macbook_pro(productDescription, capacity) {
         type = 'air';
     }
 
-    for (var i=1999; i<2100; i++) {
-        if (productDescription.indexOf(""+i) > -1) {
-            year = ""+i;
+    for (var i = 1999; i < 2100; i++) {
+        if (productDescription.indexOf("" + i) > -1) {
+            year = "" + i;
         }
     }
 
 
-    return MACBOOK_PREFIX+'-'+type+'-'+year + '-' + screensize + '-' + capacity;
+    return MACBOOK_PREFIX + '-' + type + '-' + year + '-' + screensize + '-' + capacity;
 }
 
 function classify_iphone_7_plus(productDescription, capacity) {
@@ -96,7 +96,7 @@ function classify_iphone_7_plus(productDescription, capacity) {
         carrier = 'sprint';
     }
 
-    return IPHONE_7_PLUS_PREFIX+'-'+carrier + '-' + capacity;
+    return IPHONE_7_PLUS_PREFIX + '-' + carrier + '-' + capacity;
 }
 
 function classify_iphone_7(productDescription, capacity) {
@@ -128,7 +128,7 @@ function classify_iphone_7(productDescription, capacity) {
         carrier = 'sprint';
     }
 
-    return IPHONE_7_PREFIX+'-'+carrier + '-' + capacity;
+    return IPHONE_7_PREFIX + '-' + carrier + '-' + capacity;
 }
 
 function crawlSwappa(prefix, classify, entryPoint, cb) {
@@ -142,7 +142,7 @@ function crawlSwappa(prefix, classify, entryPoint, cb) {
     dynamo.scan(params, function (err, data) {
         if (data && data.Items) {
             for (var i in data.Items) {
-                if (data.Items[i].active == 1 && data.Items[i].item_bucket.indexOf(prefix)==0) {
+                if (data.Items[i].active == 1 && data.Items[i].item_bucket.indexOf(prefix) == 0) {
                     previousItems.push(data.Items[i]);
                 }
             }
@@ -176,7 +176,7 @@ function crawlSwappa(prefix, classify, entryPoint, cb) {
 
             if (doc) { // Updating existing record
                 if (doc.price != item.price) {
-                    if (doc.price > item.price && (doc.price-item.price)>doc.price*0.05) {
+                    if (doc.price > item.price && (doc.price - item.price) > doc.price * 0.05) {
                         priceDrops.push(item);
                         item.oldPrice = doc.price;
                     }
@@ -222,7 +222,7 @@ function crawlSwappa(prefix, classify, entryPoint, cb) {
 
             console.log('Looking for sold items');
             async.eachSeries(previousItems, function (item, cb) {
-                if (!items || items.length==0)
+                if (!items || items.length == 0)
                     cb();
                 else {
                     var match = items.filter((e) => e.itemNumber == item.itemNumber);
@@ -281,11 +281,8 @@ function crawlSwappa(prefix, classify, entryPoint, cb) {
 
     retrieveProductLinks(crawler, classify, entryPoint);
 
-    //retrieveProductLinks(crawler, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios');
-    //retrieveProductLinks(crawler, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook');
-
     function retrieveProductLinks(crawler, classify, entryPoint) {
-        console.log('Entry point: ',entryPoint);
+        console.log('Entry point: ', entryPoint);
         crawler.queue({
             uri: entryPoint,
             jQuery: true,
@@ -304,7 +301,7 @@ function crawlSwappa(prefix, classify, entryPoint, cb) {
                         linkArray.push($(this).attr('href'));
                     });
 
-                    if (linkArray.length==0){
+                    if (linkArray.length == 0) {
                         var links = $("section.section_more > div.row.dev_grid > div.col-md-2.col-sm-3.col-xs-4 > div > div.title > a");
 
 
@@ -526,13 +523,13 @@ module.exports.capture_iphone_7 = (event, context, callback) => {
 
 
 if (!isLambda) {
-    /*capture(IPAD_PRO_PREFIX, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios', function (err) {
+    capture(IPAD_PRO_PREFIX, classify_ipad_pro, 'https://swappa.com/buy/devices/tablets?search=pro&platform=ios', function (err) {
         console.log('Done.');
     });
 
     capture(MACBOOK_PREFIX, classify_macbook_pro, 'https://swappa.com/buy/devices/macbook', function (err) {
         console.log('Done.');
-    });*/
+    });
 
     capture(IPHONE_7_PLUS_PREFIX, classify_iphone_7_plus, 'https://swappa.com/buy/apple-iphone-7-plus', function (err) {
         console.log('Done.');
