@@ -88,7 +88,7 @@ function classify_iphone_7_plus(productDescription, capacity) {
         carrier = 'unlocked';
     }
 
-    if (productDescription.indexOf('at&amp;t') > -1) {
+    if (productDescription.indexOf('at&amp;t') > -1 || productDescription.indexOf('at&t') > -1) {
         carrier = 'att';
     }
 
@@ -116,7 +116,7 @@ function classify_iphone_7(productDescription, capacity) {
         carrier = 'unlocked';
     }
 
-    if (productDescription.indexOf('at&amp;t') > -1) {
+    if (productDescription.indexOf('at&amp;t') > -1 || productDescription.indexOf('at&t') > -1) {
         carrier = 'att';
     }
 
