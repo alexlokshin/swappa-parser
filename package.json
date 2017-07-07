@@ -9,8 +9,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "async": "^2.4.1",
-    "aws-sdk": "^2.75.0",
+    "async": "^2.5.0",
+    "aws-sdk": "^2.82.0",
     "crawler": "^1.0.5",
     "nedb": "^1.8.0",
     "stringbuilder": "0.0.11"
